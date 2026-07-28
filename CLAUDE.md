@@ -2,6 +2,16 @@
 
 PWA de una sola página (`index.html`) para priorización colaborativa de tareas.
 
+## ⚠️ REGLAS OBLIGATORIAS (no negociables, aplican a TODO cambio, sin excepción)
+
+1. **TODO cambio va directo a `main`.** Commitea y haz `push` a `main`
+   directamente — nunca ramas, nunca Pull Requests, a menos que Angel lo pida
+   explícitamente en ese momento.
+2. **TODO cambio se documenta en `docs/BACKLOG.md` ANTES de terminar la tarea.**
+   Sin excepción — fix chico, feature grande, cambio de config, lo que sea:
+   qué se hizo, en qué archivo, y por qué (causa raíz si fue un bug). Si no
+   quedó en `docs/BACKLOG.md`, la tarea no está terminada.
+
 ## Reglas de trabajo
 
 1. **Subir directo a `main`.** Sin ramas ni PRs salvo que se pida explícitamente.
