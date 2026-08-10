@@ -1,5 +1,15 @@
 # Priori-Zen — Guía para Claude
 
+## ⚠️ Angel trabaja 100% desde el iPhone — nada de consola/terminal
+
+Angel desarrolla estos proyectos **exclusivamente desde el iPhone**. **No** le
+pidas correr comandos, `curl`, DevTools de Safari, ni editar `localStorage` a
+mano: no le es fácil desde el teléfono. Toda configuración (claves API, tokens,
+ajustes) debe hacerse **desde la UI de la app, a puros toques** — si hace falta,
+agrega un campo en Ajustes/Config. Para paneles externos (Google Cloud, Vercel,
+Supabase, etc.) dale **ligas directas ya pre-llenadas** y hazle el trabajo pesado
+tú (buscar IDs, armar las URLs). Idioma: **español (México)**.
+
 PWA de una sola página (`index.html`) para priorización colaborativa de tareas.
 
 ## ⚠️ REGLAS OBLIGATORIAS (no negociables, aplican a TODO cambio, sin excepción)
