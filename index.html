@@ -150,7 +150,16 @@ function showAdminSetup() {
     const title = document.getElementById('st').value.trim() || 'Sesión sin título';
     if (tasks.length < 2) { toast('⚠️ Agrega al menos 2 tareas'); return; }
     const code = genCode();
-    await set(ref(db,`sessions/${code}`), { title, tasks, status:'waiting', createdAt: serverTimestamp() });
+    // Antes, si `set()` fallaba (Ej. reglas de Firebase denegando el
+    // escritura), el botón "Crear sesión" no hacía absolutamente nada
+    // visible — el error solo quedaba en la consola del navegador. Con
+    // try/catch se avisa con un toast en vez de quedarse "muerto".
+    try {
+      await set(ref(db,`sessions/${code}`), { title, tasks, status:'waiting', createdAt: serverTimestamp() });
+    } catch (e) {
+      toast(`❌ No se pudo crear la sesión: ${e.message}`, 4000);
+      return;
+    }
     state.sessionCode = code;
     setSessionInURL(code);
     showAdminPanel(code);
@@ -201,8 +210,8 @@ function showAdminPanel(code) {
     <div id="rp" style="margin-top:24px"></div>
   </div>`);
   PZ._copy = (u) => navigator.clipboard.writeText(u).then(()=>toast('✓ Link copiado'));
-  PZ._start = async () => { await update(ref(db,`sessions/${code}`),{status:'active'}); toast('✅ Sesión iniciada'); };
-  PZ._close = async () => { await update(ref(db,`sessions/${code}`),{status:'closed'}); toast('🔒 Sesión cerrada'); };
+  PZ._start = async () => { try { await update(ref(db,`sessions/${code}`),{status:'active'}); toast('✅ Sesión iniciada'); } catch(e){ toast(`❌ ${e.message}`,4000); } };
+  PZ._close = async () => { try { await update(ref(db,`sessions/${code}`),{status:'closed'}); toast('🔒 Sesión cerrada'); } catch(e){ toast(`❌ ${e.message}`,4000); } };
   const unsub = onValue(ref(db,`sessions/${code}`), snap => {
     if (!snap.exists()) return;
     const d = snap.val();
@@ -246,7 +255,12 @@ function showJoin(code) {
       if (!name) { toast('⚠️ Escribe tu nombre'); return; }
       const pid = `p_${Date.now()}_${Math.random().toString(36).slice(2,5)}`;
       state.playerName = name; state.playerId = pid;
-      await set(ref(db,`sessions/${code}/joined/${pid}`),{name,id:pid,joinedAt:serverTimestamp()});
+      try {
+        await set(ref(db,`sessions/${code}/joined/${pid}`),{name,id:pid,joinedAt:serverTimestamp()});
+      } catch (e) {
+        toast(`❌ No se pudo entrar: ${e.message}`, 4000);
+        return;
+      }
       showGame(code, d, pid, name);
     };
   });
@@ -296,7 +310,13 @@ function showGame(code, sessionData, playerId, playerName) {
   PZ._mv = (i,d) => { const t=i+d; if(t<0||t>=state.items.length)return; [state.items[i],state.items[t]]=[state.items[t],state.items[i]]; refresh(); };
   PZ._submit = async () => {
     if(submitted)return; submitted=true;
-    await set(ref(db,`sessions/${code}/votes/${playerId}`),{playerId,playerName,order:state.items.map(x=>x.text),submittedAt:serverTimestamp()});
+    try {
+      await set(ref(db,`sessions/${code}/votes/${playerId}`),{playerId,playerName,order:state.items.map(x=>x.text),submittedAt:serverTimestamp()});
+    } catch (e) {
+      submitted = false;
+      toast(`❌ No se pudo enviar tu voto: ${e.message}`, 4000);
+      return;
+    }
     toast('✅ ¡Voto enviado!');
     showWaiting(code, playerName);
   };

@@ -17,6 +17,49 @@ si fue un bug). Lo más reciente va arriba.
 
 ---
 
+### 2026-09-22 — "Crear sesión" no hacía nada (causa raíz: reglas de Firebase, + falta de manejo de error)
+- **Reportado por Anvir:** "priori-zen no deja crear la nueva sesión, no hace
+  nada" — el botón "Crear sesión →" no mostraba ningún error ni cambiaba de
+  pantalla, simplemente no pasaba nada.
+- **Causa raíz real (confirmada con Playwright contra el sitio en producción):**
+  la Realtime Database de Firebase (`priori-zen-default-rtdb`) está
+  **rechazando la escritura** en `/sessions/{code}` con
+  `PERMISSION_DENIED: Permission denied` — son las reglas de seguridad de la
+  base de datos, no un bug de la app en sí. **Pendiente que Angel actualice
+  las reglas** desde la consola de Firebase (no se puede desde aquí, no hay
+  acceso a la consola de Firebase vía esta sesión):
+  https://console.firebase.google.com/project/priori-zen/database/priori-zen-default-rtdb/rules
+  — reglas sugeridas (mismo nivel de confianza que el resto del ecosistema,
+  sin auth real, solo el código de sesión como "llave"):
+  ```json
+  {
+    "rules": {
+      "sessions": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+  ```
+- **Bug real de la app, corregido aparte:** NINGUNA de las 5 escrituras a
+  Firebase (`PZ._create`, `_start`, `_close`, `_join`, `_submit`) tenía
+  `try/catch` — cuando `set()`/`update()` fallaba (por las reglas, o
+  cualquier otro motivo: sin internet, cuota excedida, etc.), la promesa
+  rechazada quedaba sin manejar y la pantalla se quedaba "muerta" sin avisar
+  nada al usuario — exactamente el síntoma reportado ("no hace nada"). Ahora
+  las 5 envuelven la llamada en `try/catch` y muestran un toast
+  `❌ ...: {mensaje}` con el error real de Firebase — así cualquier fallo
+  futuro (de reglas o de cualquier otra causa) se ve en pantalla en vez de
+  fallar en silencio.
+- **Archivo(s):** `index.html`.
+- **Cómo se verificó:** Playwright contra `https://angeldeleon-tech-priori-zen.vercel.app`
+  reprodujo el `PERMISSION_DENIED` real (confirmando la causa raíz); luego,
+  sirviendo el `index.html` con el fix localmente, el mismo flujo de "Crear
+  sesión" ahora muestra el toast de error y se queda en la pantalla de
+  configuración en vez de no hacer nada. **El fix de reglas de Firebase
+  sigue pendiente** — hasta que Angel las actualice, crear sesión seguirá
+  fallando, pero ahora avisando por qué en vez de verse "congelado".
+
 ### 2026-09-22 — Pegar varios renglones = varias tareas de una vez
 - **Qué:** pedido de Anvir: "permitir pegar algo de varios renglones y
   determinar cada renglón como una tarea a priorizar". El input de
