@@ -15,6 +15,64 @@ si fue un bug). Lo más reciente va arriba.
 - **Cómo se verificó:** prueba o comprobación.
 ```
 
+### 2026-09-22 — Modo "3 rondas graduadas" para juntas regionales (backlog-global#375)
+- **Contexto/pedido (Anvir, vía RecuerdaKA → backlog-global#375):** un
+  artefacto para la junta de la región donde "primero revisamos dos cosas y
+  luego revisamos tres cosas y luego priorizamos cinco cosas pero con
+  tiempo y cada quien vea solamente su tarjeta de órdenes pero luego
+  publicamos la de los 10... liga sin password, como lo del calendario".
+  Interpretación de los números (2+3=5 descartados de 10 → quedan 5 para
+  priorizar, confirmado con el texto literal del issue): **Ronda 1** cada
+  quien descarta 2 de los 10 temas en privado; **Ronda 2** descarta 3 más
+  de los 8 sobrevivientes; **Ronda 3** prioriza (ordena) los 5 finales. Entre
+  cada ronda se revela el agregado (conteos + qué se descartó) para
+  discutir en grupo antes de seguir — nunca el voto individual de nadie,
+  igual que el modo clásico.
+- **Decisión de diseño:** se extendió `priori-zen` (no Tas-K) agregando un
+  **modo adicional** (`sessions/{code}.mode==='rounds'`) que reutiliza el
+  mismo nodo de Firebase, `joined/`, `genCode()`, `toast()` y el algoritmo
+  de promedio de rangos de `renderResults()` (reimplementado inline para
+  la ronda 3 con la misma fórmula suma/conteo). **El modo clásico de una
+  sola ronda no se tocó** — sigue siendo `showAdminSetup`/`showGame` tal
+  cual, ahora accesible desde una pantalla nueva "¿Qué formato usamos?"
+  (`showModeSelect`, `index.html:117-132`) en vez de ir directo desde Home.
+- **Ambas opciones de origen de temas** (`index.html:530` en adelante,
+  `showRoundsSetup`): botón "Ya tengo mis temas" (captura previa, como el
+  modo clásico) o "Recolectar en vivo" — en ese caso la sesión nace en
+  `status:'collecting'`, cada participante manda su lista a
+  `topicSubs/{pid}` (`showRoundsGame` rama `collecting`), y el facilitador
+  cierra la recolección (`PZ._closeCollecting`) que deduplica y arma
+  `allTopics`/`remaining` (mínimo 6 temas o avisa con toast).
+- **Ambas opciones de tiempo:** botón "Modo manual" (el facilitador cierra
+  la ronda con "Cerrar ronda y revelar →" cuando quiera) o "Cronómetro
+  automático" con minutos configurables — guarda `roundDeadline` en la
+  sesión; el panel del facilitador corre un `setInterval` que muestra la
+  cuenta regresiva y llama a `closeCurrentRound()` sola al llegar a 0
+  (`index.html`, dentro de `showRoundsAdminPanel`). El cierre siempre
+  revisa `status==='active'` antes de escribir, para no duplicar el cierre
+  si el facilitador también le da clic manual justo cuando expira.
+- **Flujo de ronda para el participante** (`showRoundsGame`): rondas 1-2
+  muestran los temas restantes como tarjetas tocables — marcar exactamente
+  2 (o 3) para descartar, envían a `roundVotes/{ronda}/{pid}`; ronda 3
+  reusa la mecánica de arrastrar/▲▼ del modo clásico para ordenar los 5
+  finales. Cada participante solo ve su propia tarjeta — el agregado
+  (`roundResults/{ronda}`) solo se calcula y revela cuando el facilitador
+  (o el cronómetro) cierra la ronda.
+- **Archivo(s):** `index.html` (CSS: `.choice-row/.choice-btn/.discard-marked/
+  .round-pill/.countdown/.elim-tag/.mini-input-row`; JS: `showModeSelect`,
+  `showRoundsSetup`, `showRoundsAdminPanel`, `closeCurrentRound`,
+  `showRoundsGame`, y las nuevas entradas en `window.PZ`).
+- **Cómo iniciar cada modo:** Home → "Crear sesión →" → elegir "Ronda
+  única" (como antes) o "3 rondas graduadas" (nuevo). En el nuevo, elegir
+  origen de temas y modo de tiempo, crear, compartir el link/código (sin
+  password, igual que siempre) y avanzar Ronda 1 → 2 → 3 desde el panel.
+- **Cómo se verificó:** revisión manual del flujo de datos en Firebase
+  (nombres de nodos consistentes entre lectura/escritura) y chequeo de
+  sintaxis del `<script type="module">` completo con `node --check`
+  (quitando las líneas `import`, mismo método usado en la entrada anterior
+  de este backlog) — sin errores.
+```
+
 ---
 
 ### 2026-09-22 — "Crear sesión" no hacía nada (causa raíz: reglas de Firebase, + falta de manejo de error)

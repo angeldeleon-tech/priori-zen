@@ -69,6 +69,16 @@
     .c3{background:#43D9AD;color:#001a0f} .c4{background:#4CC9F0;color:#001015} .c5{background:#7B5EA7;color:#f0ede8}
     .c6{background:#FF6B9D;color:#1a0010} .c7{background:#06D6A0;color:#001a11} .c8{background:#a78bfa;color:#0d001a}
     .c9{background:#fb923c;color:#1a0800}
+    .choice-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    .choice-btn { flex: 1; min-width: 180px; text-align: left; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 0.85rem; }
+    .choice-btn strong { display: block; color: var(--text); font-family: 'Syne', sans-serif; font-size: 0.9rem; margin-bottom: 2px; }
+    .choice-btn.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--text); }
+    .discard-marked { outline: 2px solid var(--accent2); opacity: 0.55; }
+    .round-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 6px 14px; font-size: 0.75rem; color: var(--accent); font-weight: 700; margin-bottom: 14px; font-family: 'Syne', sans-serif; letter-spacing: 0.04em; }
+    .countdown { font-family: 'Syne', sans-serif; font-weight: 900; font-size: 1.1rem; color: var(--accent2); }
+    .elim-tag { text-decoration: line-through; opacity: 0.5; }
+    .mini-input-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+    .mini-input-row input[type=number] { width: 80px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'DM Sans', sans-serif; }
   </style>
 </head>
 <body>
@@ -118,8 +128,29 @@ function showHome() {
     <h1 class="hero-title">¿Qué importa<br><em>más?</em></h1>
     <p class="hero-sub">Crea una sesión, comparte el link y tu equipo ordena sus prioridades en tiempo real.</p>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="PZ.showAdminSetup()">Crear sesión →</button>
+      <button class="btn btn-primary" onclick="PZ.showModeSelect()">Crear sesión →</button>
       <button class="btn btn-secondary" onclick="PZ.promptJoin()">Unirme con código</button>
+    </div>
+  </div>`);
+}
+
+// Elegir entre el modo clásico (una sola ronda) y el modo de 3 rondas
+// graduadas (issue backlog-global#375: junta regional — revisar/descartar
+// 2, luego descartar 3, y priorizar los 5 finales). No se tocó el modo
+// clásico: es un modo adicional que reutiliza sessions/{code}, votos y
+// renderResults() donde aplica.
+function showModeSelect() {
+  state.screen = 'mode-select';
+  render(`<div class="screen">
+    ${logo()}
+    <div class="badge">Nueva Sesión</div>
+    <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.8rem;margin-bottom:20px">¿Qué formato usamos?</h2>
+    <div class="choice-row" style="flex-direction:column">
+      <button class="choice-btn" onclick="PZ.showAdminSetup()"><strong>🎯 Ronda única</strong>Todos ordenan la lista completa una sola vez y se revela el resultado.</button>
+      <button class="choice-btn" onclick="PZ.showRoundsSetup()"><strong>🏆 3 rondas graduadas</strong>Para juntas: Ronda 1 descarta 2 temas, Ronda 2 descarta 3 más, Ronda 3 prioriza los que queden. Con discusión en grupo entre rondas.</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="PZ.showHome()">← Atrás</button>
     </div>
   </div>`);
 }
@@ -237,7 +268,7 @@ function showJoin(code) {
   get(ref(db,`sessions/${code}`)).then(snap => {
     if (!snap.exists()) { render(`<div class="screen">${logo()}<p style="color:var(--muted)">Sesión no encontrada.</p><div class="btn-row"><button class="btn btn-secondary" onclick="PZ.showHome()">← Inicio</button></div></div>`); return; }
     const d = snap.val();
-    if (d.status==='closed') { render(`<div class="screen">${logo()}<p style="color:var(--muted)">Esta sesión ya está cerrada.</p><div class="btn-row"><button class="btn btn-secondary" onclick="PZ.showHome()">← Inicio</button></div></div>`); return; }
+    if (d.status==='closed' && d.mode!=='rounds') { render(`<div class="screen">${logo()}<p style="color:var(--muted)">Esta sesión ya está cerrada.</p><div class="btn-row"><button class="btn btn-secondary" onclick="PZ.showHome()">← Inicio</button></div></div>`); return; }
     render(`<div class="screen">
       ${logo()}
       <div class="badge">Unirse</div>
@@ -261,6 +292,7 @@ function showJoin(code) {
         toast(`❌ No se pudo entrar: ${e.message}`, 4000);
         return;
       }
+      if (d.mode === 'rounds') { showRoundsGame(code, pid, name); return; }
       showGame(code, d, pid, name);
     };
   });
@@ -417,9 +449,468 @@ function renderResults(id, tasks, votes, animated) {
   if(animated) ranked.forEach((item,idx)=>{ const pct=Math.max(8,100-item.avg*12); setTimeout(()=>{ const b=document.getElementById(`b${id}${idx}`); if(b)b.style.width=pct+'%'; },idx*120); });
 }
 
+// ============================================================================
+// MODO "3 RONDAS GRADUADAS" (backlog-global#375, "Priori-Zen para juntas")
+// ----------------------------------------------------------------------------
+// Reutiliza el mismo nodo sessions/{code} y el mismo genCode()/joined/toast()
+// que el modo clásico — es un modo adicional (sessions/{code}.mode==='rounds'),
+// no reemplaza al de una sola ronda (showAdminSetup/showGame siguen intactos).
+//
+// Mecánica (del pedido original: "revisamos dos... revisamos tres...
+// priorizamos cinco", 2+3=5 descartados de 10 → quedan 5 para priorizar):
+//   Ronda 1: cada quien descarta (en privado) 2 de los temas restantes.
+//   Ronda 2: cada quien descarta 3 más de los que sobrevivieron.
+//   Ronda 3: cada quien prioriza (ordena) los que quedaron.
+// Entre rondas se revela el agregado (qué se descartó/cómo quedó, con
+// conteos) para discutir en grupo antes de seguir — nunca el voto individual
+// de nadie, solo el agregado, igual que el modo clásico.
+//
+// Origen de los 10 temas: precargados por el facilitador (como el modo
+// clásico) o recolectados en vivo (topicSubs/{pid}) antes de abrir la Ronda 1.
+// Tiempo por ronda: manual (botón del facilitador) o cronómetro automático
+// (roundDeadline en sessions/{code}, revisado del lado del facilitador).
+function discardCountFor(round) { return round===1 ? 2 : 3; }
+function roundLabel(round) { return round===1?'Ronda 1 · Descartar 2':round===2?'Ronda 2 · Descartar 3':'Ronda 3 · Priorizar'; }
+
+function showRoundsSetup() {
+  state.screen = 'rounds-setup';
+  let tasks = ['🚀 Lanzar MVP al mercado','💡 Investigar nuevas tecnologías','🤝 Reunión con inversores','🐛 Corregir bugs críticos','📊 Analizar métricas','🎨 Rediseñar interfaz','📣 Campaña de marketing','🔐 Auditoría de seguridad','🌎 Expansión regional','👥 Contratación clave'];
+  let cfg = { topicsSource:'preloaded', timerMode:'manual', timerMinutes:5 };
+  function tagsHTML() { return tasks.map((t,i)=>`<span class="task-tag">${t}<button onclick="PZ._rrt(${i})">✕</button></span>`).join(''); }
+  PZ._rrt = (i) => { tasks.splice(i,1); const w=document.getElementById('tw'); if(w) w.innerHTML=tagsHTML(); };
+  PZ._rat = () => { const v=document.getElementById('ti').value.trim(); if(!v)return; tasks.push(v); document.getElementById('ti').value=''; document.getElementById('tw').innerHTML=tagsHTML(); };
+  PZ._rSrc = (v) => { cfg.topicsSource=v; renderSetup(); };
+  PZ._rTimer = (v) => { cfg.timerMode=v; renderSetup(); };
+  PZ._createRounds = async () => {
+    const title = document.getElementById('st').value.trim() || 'Junta regional';
+    const minutesEl = document.getElementById('rmin');
+    if (minutesEl) cfg.timerMinutes = Math.max(1, parseInt(minutesEl.value,10) || 5);
+    if (cfg.topicsSource==='preloaded' && tasks.length < 6) { toast('⚠️ Agrega al menos 6 temas (se descartan 2+3)'); return; }
+    const code = genCode();
+    const payload = {
+      title, mode:'rounds', topicsSource:cfg.topicsSource, timerMode:cfg.timerMode,
+      timerMinutes: cfg.timerMode==='auto' ? cfg.timerMinutes : null,
+      status: cfg.topicsSource==='live' ? 'collecting' : 'waiting',
+      round: 0, createdAt: serverTimestamp(),
+    };
+    if (cfg.topicsSource==='preloaded') { payload.allTopics = tasks; payload.remaining = tasks; }
+    try {
+      await set(ref(db,`sessions/${code}`), payload);
+    } catch (e) { toast(`❌ No se pudo crear la sesión: ${e.message}`, 4000); return; }
+    state.sessionCode = code;
+    setSessionInURL(code);
+    showRoundsAdminPanel(code);
+  };
+  function renderSetup() {
+    render(`<div class="screen">
+      ${logo()}
+      <div class="badge">3 Rondas · Nueva Sesión</div>
+      <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.8rem;margin-bottom:20px">Configura la junta</h2>
+      <div class="section-title">Nombre de la sesión</div>
+      <input type="text" id="st" placeholder="Ej. Junta de Gerentes Regionales" style="margin-bottom:20px"/>
+      <div class="section-title">¿De dónde salen los temas?</div>
+      <div class="choice-row">
+        <button class="choice-btn ${cfg.topicsSource==='preloaded'?'selected':''}" onclick="PZ._rSrc('preloaded')"><strong>📋 Ya tengo mis temas</strong>Los capturas tú antes de la junta.</button>
+        <button class="choice-btn ${cfg.topicsSource==='live'?'selected':''}" onclick="PZ._rSrc('live')"><strong>🎤 Recolectar en vivo</strong>Cada participante propone temas al entrar.</button>
+      </div>
+      ${cfg.topicsSource==='preloaded' ? `
+      <div class="section-title">Temas a priorizar (mínimo 6, ideal 10)</div>
+      <div class="tasks-tags-wrap" id="tw">${tagsHTML()}</div>
+      <div class="tag-input-wrap">
+        <input type="text" id="ti" placeholder="Agregar tema..." onkeydown="if(event.key==='Enter')PZ._rat()"/>
+        <button class="btn btn-secondary" onclick="PZ._rat()" style="padding:14px 18px;flex-shrink:0">+ Agregar</button>
+      </div>` : `<p style="color:var(--muted);font-size:0.82rem;margin-bottom:20px">Los participantes escribirán sus temas al unirse; tú cierras la recolección cuando estén listos y arrancamos la Ronda 1.</p>`}
+      <div class="section-title">Tiempo por ronda</div>
+      <div class="choice-row">
+        <button class="choice-btn ${cfg.timerMode==='manual'?'selected':''}" onclick="PZ._rTimer('manual')"><strong>✋ Modo manual</strong>Tú avanzas de ronda cuando el grupo esté listo.</button>
+        <button class="choice-btn ${cfg.timerMode==='auto'?'selected':''}" onclick="PZ._rTimer('auto')"><strong>⏱ Cronómetro automático</strong>Cada ronda cierra sola al vencer el tiempo.</button>
+      </div>
+      ${cfg.timerMode==='auto' ? `<div class="mini-input-row" style="margin-bottom:20px"><span style="color:var(--muted);font-size:0.85rem">Minutos por ronda:</span><input type="number" id="rmin" value="${cfg.timerMinutes}" min="1" max="60"/></div>` : ''}
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="PZ._createRounds()">Crear sesión →</button>
+        <button class="btn btn-secondary" onclick="PZ.showModeSelect()">← Atrás</button>
+      </div>
+    </div>`);
+  }
+  renderSetup();
+}
+
+function showRoundsAdminPanel(code) {
+  clearListeners();
+  state.screen = 'rounds-admin';
+  let timerHandle = null;
+  const unsub = onValue(ref(db,`sessions/${code}`), snap => {
+    if (!snap.exists()) return;
+    renderRoundsAdmin(code, snap.val());
+  });
+  state.listeners.push(unsub);
+  state.listeners.push(() => { if (timerHandle) clearInterval(timerHandle); });
+
+  function renderRoundsAdmin(code, d) {
+    const link = `${location.origin}${location.pathname}?s=${code}`;
+    if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+
+    PZ._copyR = (u) => navigator.clipboard.writeText(u).then(()=>toast('✓ Link copiado'));
+    PZ._closeCollecting = async () => {
+      try {
+        const snap = await get(ref(db,`sessions/${code}/topicSubs`));
+        const subs = snap.exists() ? Object.values(snap.val()) : [];
+        const all = [];
+        subs.forEach(s => (s.topics||[]).forEach(t => { if (t && !all.includes(t)) all.push(t); }));
+        if (all.length < 6) { toast('⚠️ Necesitas al menos 6 temas recolectados'); return; }
+        await update(ref(db,`sessions/${code}`), { allTopics: all, remaining: all, status:'waiting' });
+      } catch (e) { toast(`❌ ${e.message}`, 4000); }
+    };
+    PZ._startRound1 = async () => {
+      try {
+        await update(ref(db,`sessions/${code}`), {
+          round: 1, status:'active',
+          roundDeadline: d.timerMode==='auto' ? Date.now()+d.timerMinutes*60000 : null,
+        });
+      } catch (e) { toast(`❌ ${e.message}`, 4000); }
+    };
+    PZ._forceCloseRound = async () => { await closeCurrentRound(code, d); };
+    PZ._nextRound = async () => {
+      const nextRound = (d.round||0) + 1;
+      try {
+        await update(ref(db,`sessions/${code}`), {
+          round: nextRound, status:'active',
+          roundDeadline: d.timerMode==='auto' ? Date.now()+d.timerMinutes*60000 : null,
+        });
+      } catch (e) { toast(`❌ ${e.message}`, 4000); }
+    };
+    PZ._closeSessionR = async () => { try { await update(ref(db,`sessions/${code}`),{status:'closed'}); } catch(e){ toast(`❌ ${e.message}`,4000);} };
+
+    const shareBlock = `
+      <div class="section-title">Comparte este link</div>
+      <div class="copy-wrap"><span>${link}</span><button class="copy-btn" onclick="PZ._copyR('${link}')">Copiar</button></div>
+      <p style="color:var(--muted);font-size:0.8rem;margin:8px 0 4px">O el código:</p>
+      <div class="session-code">${code}</div>`;
+
+    if (d.status === 'collecting') {
+      const subs = d.topicSubs ? Object.values(d.topicSubs) : [];
+      const total = subs.reduce((n,s)=>n+((s.topics||[]).length),0);
+      render(`<div class="screen">
+        ${logo()}
+        <div class="badge">Panel Admin · Recolectando temas</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:4px">${d.title}</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:16px">🎤 Esperando que el grupo proponga temas...</p>
+        ${shareBlock}
+        <div class="section-title" style="margin-top:20px">Participantes (${subs.length}) · ${total} tema${total!==1?'s':''} propuestos</div>
+        <div class="participants">${subs.map(s=>`<div class="participant-chip ${(s.topics||[]).length?'active':''}">${(s.topics||[]).length?'<div class="dot"></div>':''}${s.name} (${(s.topics||[]).length})</div>`).join('') || '<p style="color:var(--muted);font-size:0.85rem">Nadie se ha unido aún...</p>'}</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="PZ._closeCollecting()">Cerrar recolección →</button>
+          <button class="btn btn-danger" onclick="PZ._closeSessionR()">Cerrar sesión</button>
+        </div>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'waiting') {
+      const joined = d.joined ? Object.values(d.joined) : [];
+      render(`<div class="screen">
+        ${logo()}
+        <div class="badge">Panel Admin</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:4px">${d.title}</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:16px">⏳ Listo para arrancar la Ronda 1 · ${(d.allTopics||[]).length} temas</p>
+        ${shareBlock}
+        <div class="section-title" style="margin-top:20px">Participantes en vivo</div>
+        <div class="participants">${joined.map(p=>`<div class="participant-chip">${p.name}</div>`).join('') || '<p style="color:var(--muted);font-size:0.85rem">Nadie se ha unido aún...</p>'}</div>
+        <div class="tasks-tags-wrap">${(d.allTopics||[]).map(t=>`<span class="task-tag">${t}</span>`).join('')}</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="PZ._startRound1()">▶ Iniciar Ronda 1</button>
+          <button class="btn btn-danger" onclick="PZ._closeSessionR()">Cerrar sesión</button>
+        </div>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'active') {
+      const votes = (d.roundVotes && d.roundVotes[d.round]) ? Object.values(d.roundVotes[d.round]) : [];
+      const joined = d.joined ? Object.values(d.joined) : [];
+      const pct = joined.length ? Math.round(votes.length/joined.length*100) : 0;
+      render(`<div class="screen">
+        ${logo()}
+        <div class="round-pill">${roundLabel(d.round)}</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:4px">${d.title}</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:16px">🟢 En curso · ${(d.remaining||[]).length} temas en juego</p>
+        <div id="cd" style="margin-bottom:12px"></div>
+        <div class="progress-wrap"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <p style="color:var(--muted);font-size:0.8rem;text-align:center;margin:6px 0 16px">${votes.length} de ${joined.length} han votado (${pct}%)</p>
+        <div class="participants">${joined.map(p=>{const v=votes.some(x=>x.playerId===p.id);return `<div class="participant-chip ${v?'active':''}">${v?'<div class="dot"></div>':''}${p.name}${v?' ✓':''}</div>`;}).join('') || '<p style="color:var(--muted);font-size:0.85rem">Nadie se ha unido aún...</p>'}</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="PZ._forceCloseRound()">Cerrar ronda y revelar →</button>
+          <button class="btn btn-danger" onclick="PZ._closeSessionR()">Cerrar sesión</button>
+        </div>
+      </div>`);
+      if (d.timerMode === 'auto' && d.roundDeadline) {
+        const tick = () => {
+          const left = Math.max(0, Math.round((d.roundDeadline - Date.now())/1000));
+          const el = document.getElementById('cd');
+          if (el) el.innerHTML = `<span class="countdown">⏱ ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}</span>`;
+          if (left <= 0) { clearInterval(timerHandle); timerHandle=null; closeCurrentRound(code, d); }
+        };
+        tick();
+        timerHandle = setInterval(tick, 1000);
+      }
+      return;
+    }
+
+    if (d.status === 'round-result') {
+      const rr = (d.roundResults && d.roundResults[d.round]) || {counts:{},eliminated:[]};
+      const base = d.round===1 ? (d.allTopics||[]) : (d.roundResults && d.roundResults[d.round-1] ? d.roundResults[d.round-1].remainingAfter : d.remaining) || [];
+      const rowsHTML = base.map((t,i)=>{
+        const c = rr.counts ? (rr.counts[t]||0) : 0;
+        const out = (rr.eliminated||[]).includes(t);
+        return `<div class="stat-card ${COLORS[i%COLORS.length]}"><div style="flex:1"><div class="task-text ${out?'elim-tag':''}">${t}</div><div style="font-size:0.7rem;opacity:0.6;margin-top:4px">${out?'❌ Descartado':'✅ Sigue'} · ${c} voto${c!==1?'s':''} de descarte</div></div></div>`;
+      }).join('');
+      const isLast = d.round >= 3;
+      render(`<div class="screen">
+        ${logo()}
+        <div class="round-pill">${roundLabel(d.round)} · Resultado</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:12px">${d.title}</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:12px">Discútanlo en grupo antes de seguir.</p>
+        <div>${rowsHTML}</div>
+        <div class="btn-row">
+          ${isLast ? '' : `<button class="btn btn-primary" onclick="PZ._nextRound()">Siguiente ronda →</button>`}
+          <button class="btn btn-danger" onclick="PZ._closeSessionR()">Cerrar sesión</button>
+        </div>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'closed') {
+      const rr = (d.roundResults && d.roundResults[3]) || {ranked:[]};
+      render(`<div class="screen">
+        ${logo()}
+        <div class="badge">Resultado Final</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;margin-bottom:16px">${d.title}</h2>
+        <div>${(rr.ranked||[]).map((item,idx)=>`<div class="stat-card ${COLORS[idx%COLORS.length]}"><div class="task-rank">${idx+1}</div><div style="flex:1"><div class="task-text">${item.text}</div><div style="font-size:0.7rem;opacity:0.6;margin-top:4px">Promedio: ${item.avg.toFixed(1)}</div></div>${idx===0?'<div style="font-size:1.3rem">👑</div>':''}</div>`).join('') || '<p style="color:var(--muted)">Sesión cerrada sin resultado final.</p>'}</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="PZ.showHome()">← Inicio</button>
+        </div>
+      </div>`);
+      return;
+    }
+  }
+}
+
+// Calcula y guarda el cierre de la ronda actual: descarta (rondas 1-2) o
+// prioriza (ronda 3), y avanza status a 'round-result' (o 'closed' si era
+// la ronda 3). Se llama tanto del botón manual como del cronómetro.
+async function closeCurrentRound(code, d) {
+  try {
+    const votesSnap = await get(ref(db,`sessions/${code}`));
+    if (!votesSnap.exists()) return;
+    const fresh = votesSnap.val();
+    if (fresh.status !== 'active') return; // ya se cerró (evita doble disparo)
+    const round = fresh.round;
+    const roundVotes = (fresh.roundVotes && fresh.roundVotes[round]) || {};
+    if (round === 3) {
+      const remaining = fresh.remaining || [];
+      const votes = Object.values(roundVotes);
+      const sums={},counts={};
+      remaining.forEach(t=>{sums[t]=0;counts[t]=0;});
+      votes.forEach(v=>{ if(!v.order)return; v.order.forEach((t,r)=>{ if(sums[t]!==undefined){sums[t]+=r;counts[t]++;} }); });
+      const ranked = remaining.map(t=>({text:t,avg:counts[t]>0?sums[t]/counts[t]:99})).sort((a,b)=>a.avg-b.avg);
+      await update(ref(db,`sessions/${code}`), { [`roundResults/3`]: { ranked }, status:'closed' });
+    } else {
+      const remaining = fresh.remaining || fresh.allTopics || [];
+      const discardCount = discardCountFor(round);
+      const votes = Object.values(roundVotes);
+      const counts = {}; remaining.forEach(t=>counts[t]=0);
+      votes.forEach(v=>{ (v.discard||[]).forEach(t=>{ if(counts[t]!==undefined) counts[t]++; }); });
+      const withIdx = remaining.map((t,i)=>({t,i,c:counts[t]}));
+      withIdx.sort((a,b)=> b.c-a.c || a.i-b.i);
+      const eliminated = withIdx.slice(0,Math.min(discardCount,remaining.length-1)).map(x=>x.t);
+      const remainingAfter = remaining.filter(t=>!eliminated.includes(t));
+      await update(ref(db,`sessions/${code}`), {
+        [`roundResults/${round}`]: { counts, eliminated, remainingAfter },
+        remaining: remainingAfter, status:'round-result',
+      });
+    }
+  } catch (e) { toast(`❌ ${e.message}`, 4000); }
+}
+
+function showRoundsGame(code, pid, name) {
+  clearListeners();
+  state.screen = 'rounds-game';
+  let myTopics = [];
+  let marked = [];
+  let orderItems = [];
+  let dragSrc = null;
+  let submittedFor = null; // ronda ya enviada, para no reenviar
+
+  const unsub = onValue(ref(db,`sessions/${code}`), snap => {
+    if (!snap.exists()) return;
+    renderGame(snap.val());
+  });
+  state.listeners.push(unsub);
+
+  function renderGame(d) {
+    if (d.status === 'closed' && (d.round||0) < 3) { render(`<div class="screen">${logo()}<p style="color:var(--muted)">Esta sesión ya está cerrada.</p><div class="btn-row"><button class="btn btn-secondary" onclick="PZ.showHome()">← Inicio</button></div></div>`); return; }
+
+    if (d.status === 'collecting') {
+      function tagsHTML() { return myTopics.map((t,i)=>`<span class="task-tag">${t}<button onclick="PZ._rgRt(${i})">✕</button></span>`).join(''); }
+      PZ._rgRt = (i) => { myTopics.splice(i,1); document.getElementById('tw').innerHTML=tagsHTML(); };
+      PZ._rgAt = () => { const v=document.getElementById('ti').value.trim(); if(!v)return; myTopics.push(v); document.getElementById('ti').value=''; document.getElementById('tw').innerHTML=tagsHTML(); };
+      PZ._rgSubmitTopics = async () => {
+        if (myTopics.length===0) { toast('⚠️ Agrega al menos un tema'); return; }
+        try { await set(ref(db,`sessions/${code}/topicSubs/${pid}`), {name, topics:myTopics}); toast('✅ Temas enviados'); }
+        catch(e){ toast(`❌ ${e.message}`,4000); }
+      };
+      render(`<div class="screen">
+        ${logo()}
+        <div class="badge">Proponer temas</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;margin:4px 0">Hola, ${name} 👋</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:16px">${d.title} · Escribe los temas que quieres que se prioricen.</p>
+        <div class="tasks-tags-wrap" id="tw">${tagsHTML()}</div>
+        <div class="tag-input-wrap">
+          <input type="text" id="ti" placeholder="Agregar tema..." onkeydown="if(event.key==='Enter')PZ._rgAt()"/>
+          <button class="btn btn-secondary" onclick="PZ._rgAt()" style="padding:14px 18px;flex-shrink:0">+ Agregar</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-green" onclick="PZ._rgSubmitTopics()">Enviar mis temas ✓</button>
+        </div>
+        <p style="color:var(--muted);font-size:0.78rem;margin-top:16px">Puedes seguir editando y reenviar mientras el facilitador no cierre la recolección.</p>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'waiting') {
+      render(`<div class="screen" style="text-align:center;padding-top:60px">
+        ${logo()}
+        <div style="font-size:3rem;margin-bottom:16px">🧘</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;margin-bottom:8px">Hola, ${name}</h2>
+        <p style="color:var(--muted)">Esperando a que el facilitador inicie la Ronda 1...</p>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'active') {
+      const already = d.roundVotes && d.roundVotes[d.round] && d.roundVotes[d.round][pid];
+      if (already || submittedFor === d.round) { renderRoundWait(d); return; }
+      if (d.round === 3) { renderFinalRank(d); } else { renderDiscard(d); }
+      return;
+    }
+
+    if (d.status === 'round-result') {
+      const rr = (d.roundResults && d.roundResults[d.round]) || {counts:{},eliminated:[]};
+      const base = d.round===1 ? (d.allTopics||[]) : (d.roundResults && d.roundResults[d.round-1] ? d.roundResults[d.round-1].remainingAfter : d.remaining) || [];
+      render(`<div class="screen">
+        ${logo()}
+        <div class="round-pill">${roundLabel(d.round)} · Resultado</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;margin-bottom:12px">${d.title}</h2>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:12px">Comenten en grupo. Esperando al facilitador para seguir...</p>
+        <div>${base.map((t,i)=>{const c=rr.counts?(rr.counts[t]||0):0; const out=(rr.eliminated||[]).includes(t); return `<div class="stat-card ${COLORS[i%COLORS.length]}"><div style="flex:1"><div class="task-text ${out?'elim-tag':''}">${t}</div><div style="font-size:0.7rem;opacity:0.6;margin-top:4px">${out?'❌ Descartado':'✅ Sigue'} · ${c} voto${c!==1?'s':''}</div></div></div>`;}).join('')}</div>
+      </div>`);
+      return;
+    }
+
+    if (d.status === 'closed' && d.round >= 3) {
+      const rr = (d.roundResults && d.roundResults[3]) || {ranked:[]};
+      render(`<div class="screen">
+        ${logo()}
+        <div class="badge">Resultado Final</div>
+        <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;margin-bottom:16px">${d.title}</h2>
+        <div>${(rr.ranked||[]).map((item,idx)=>`<div class="stat-card ${COLORS[idx%COLORS.length]}"><div class="task-rank">${idx+1}</div><div style="flex:1"><div class="task-text">${item.text}</div><div style="font-size:0.7rem;opacity:0.6;margin-top:4px">Promedio: ${item.avg.toFixed(1)}</div></div>${idx===0?'<div style="font-size:1.3rem">👑</div>':''}</div>`).join('')}</div>
+        <div class="btn-row"><button class="btn btn-primary" onclick="PZ.showHome()">← Inicio</button></div>
+      </div>`);
+      return;
+    }
+  }
+
+  function renderDiscard(d) {
+    const items = (d.remaining||d.allTopics||[]);
+    const dc = discardCountFor(d.round);
+    if (marked.length===0 || state._markedRound !== d.round) { marked = []; state._markedRound = d.round; }
+    function cardsHTML() {
+      return items.map((t,idx)=>`<div class="task-card ${COLORS[idx%COLORS.length]} ${marked.includes(t)?'discard-marked':''}" onclick="PZ._rgToggle('${idx}')" style="cursor:pointer">
+        <div class="task-text">${t}</div>
+        <div style="font-size:0.75rem;font-weight:700">${marked.includes(t)?'🗑 Descartar':''}</div>
+      </div>`).join('');
+    }
+    PZ._rgToggle = (idxStr) => {
+      const idx = parseInt(idxStr,10); const t = items[idx];
+      if (marked.includes(t)) { marked = marked.filter(x=>x!==t); }
+      else { if (marked.length >= dc) { toast(`⚠️ Solo puedes marcar ${dc}`); return; } marked.push(t); }
+      const w = document.getElementById('cw'); if (w) w.innerHTML = cardsHTML();
+      const btn = document.getElementById('sb'); if (btn) btn.disabled = marked.length !== dc;
+    };
+    PZ._rgSubmitDiscard = async () => {
+      if (marked.length !== dc) { toast(`⚠️ Marca exactamente ${dc}`); return; }
+      submittedFor = d.round;
+      try { await set(ref(db,`sessions/${code}/roundVotes/${d.round}/${pid}`), {playerId:pid,name,discard:marked,submittedAt:serverTimestamp()}); toast('✅ Voto enviado'); }
+      catch(e){ submittedFor=null; toast(`❌ ${e.message}`,4000); }
+    };
+    render(`<div class="screen">
+      ${logo()}
+      <div class="round-pill">${roundLabel(d.round)}</div>
+      <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;margin:4px 0">Hola, ${name} 👋</h2>
+      <p style="color:var(--muted);font-size:0.8rem;margin-bottom:12px">${d.title} · Toca ${dc} temas para descartar. Solo tú ves esto.</p>
+      <div id="cw">${cardsHTML()}</div>
+      <div class="btn-row">
+        <button class="btn btn-green" id="sb" disabled onclick="PZ._rgSubmitDiscard()">Enviar mi descarte ✓</button>
+      </div>
+    </div>`);
+  }
+
+  function renderFinalRank(d) {
+    const items = d.remaining||[];
+    if (orderItems.length===0) { orderItems = items.map((t,i)=>({text:t,color:COLORS[i%COLORS.length]})); orderItems.sort(()=>Math.random()-0.5); }
+    function cardsHTML() {
+      return orderItems.map((item,idx)=>`
+        <div class="task-card ${item.color}" draggable="true" data-idx="${idx}"
+          ondragstart="PZ._rgDs(${idx})" ondragenter="PZ._rgDe(${idx})" ondragend="PZ._rgDd()" ondragover="event.preventDefault()">
+          <div class="task-rank">${idx+1}</div>
+          <div class="task-text">${item.text}</div>
+          <div class="task-arrows">
+            <button class="arrow-btn" onclick="PZ._rgMv(${idx},-1)" ${idx===0?'disabled':''}>▲</button>
+            <button class="arrow-btn" onclick="PZ._rgMv(${idx},1)" ${idx===orderItems.length-1?'disabled':''}>▼</button>
+          </div>
+          <div class="drag-handle">⠿</div>
+        </div>`).join('');
+    }
+    function refresh() { const w=document.getElementById('cw'); if(w) w.innerHTML=cardsHTML(); }
+    PZ._rgDs = (i) => { dragSrc=i; };
+    PZ._rgDe = (i) => { if(dragSrc===null||dragSrc===i)return; const c=[...orderItems]; const[m]=c.splice(dragSrc,1); c.splice(i,0,m); orderItems=c; dragSrc=i; refresh(); };
+    PZ._rgDd = () => { dragSrc=null; };
+    PZ._rgMv = (i,dd) => { const t=i+dd; if(t<0||t>=orderItems.length)return; [orderItems[i],orderItems[t]]=[orderItems[t],orderItems[i]]; refresh(); };
+    PZ._rgSubmitFinal = async () => {
+      submittedFor = d.round;
+      try { await set(ref(db,`sessions/${code}/roundVotes/3/${pid}`), {playerId:pid,name,order:orderItems.map(x=>x.text),submittedAt:serverTimestamp()}); toast('✅ ¡Prioridad enviada!'); }
+      catch(e){ submittedFor=null; toast(`❌ ${e.message}`,4000); }
+    };
+    render(`<div class="screen">
+      ${logo()}
+      <div class="round-pill">${roundLabel(3)}</div>
+      <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;margin:4px 0">Hola, ${name} 👋</h2>
+      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:12px">Arrastra o usa ▲▼ · Nº1 = más importante. Solo tú ves esto.</p>
+      <div id="cw">${cardsHTML()}</div>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="PZ._rgSubmitFinal()">Enviar mi prioridad ✓</button>
+      </div>
+    </div>`);
+  }
+
+  function renderRoundWait(d) {
+    render(`<div class="screen" style="text-align:center;padding-top:60px">
+      ${logo()}
+      <div style="font-size:3rem;margin-bottom:16px">🧘</div>
+      <h2 style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;margin-bottom:8px">¡Listo, ${name}!</h2>
+      <p style="color:var(--muted)">Tu voto de esta ronda quedó registrado.<br>Esperando a los demás...</p>
+    </div>`);
+  }
+}
+
 window.PZ = { showHome, showAdminSetup, showAdminPanel, showJoin, promptJoin, showResults, showWaiting,
+  showModeSelect, showRoundsSetup, showRoundsAdminPanel, showRoundsGame,
   _rt:null,_at:null,_pt:null,_create:null,_join:null,_gj:null,_ds:null,_de:null,_dd:null,_mv:null,
-  _submit:null,_sh:null,_start:null,_close:null,_copy:null };
+  _submit:null,_sh:null,_start:null,_close:null,_copy:null,
+  _rrt:null,_rat:null,_rSrc:null,_rTimer:null,_createRounds:null,
+  _copyR:null,_closeCollecting:null,_startRound1:null,_forceCloseRound:null,_nextRound:null,_closeSessionR:null,
+  _rgRt:null,_rgAt:null,_rgSubmitTopics:null,_rgToggle:null,_rgSubmitDiscard:null,
+  _rgDs:null,_rgDe:null,_rgDd:null,_rgMv:null,_rgSubmitFinal:null };
 
 showHome();
 </script>
