@@ -130,6 +130,22 @@ function showAdminSetup() {
   function tagsHTML() { return tasks.map((t,i)=>`<span class="task-tag">${t}<button onclick="PZ._rt(${i})">✕</button></span>`).join(''); }
   PZ._rt = (i) => { tasks.splice(i,1); document.getElementById('tw').innerHTML=tagsHTML(); };
   PZ._at = () => { const v=document.getElementById('ti').value.trim(); if(!v)return; tasks.push(v); document.getElementById('ti').value=''; document.getElementById('tw').innerHTML=tagsHTML(); };
+  // Pegar varios renglones de una vez: cada renglón se vuelve una tarea
+  // aparte (Ej. pegar una lista copiada de notas/Excel), en vez de meter
+  // todo el bloque como una sola tarea gigante con saltos de línea. Un
+  // pegado de una sola línea (o sin salto de línea) sigue el flujo normal
+  // del input — no se intercepta.
+  PZ._pt = (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (!text.includes('\n')) return;
+    e.preventDefault();
+    const lineas = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    if (!lineas.length) return;
+    lineas.forEach(l=>tasks.push(l));
+    document.getElementById('ti').value = '';
+    document.getElementById('tw').innerHTML = tagsHTML();
+    toast(`✅ ${lineas.length} tarea${lineas.length!==1?'s':''} agregada${lineas.length!==1?'s':''}`);
+  };
   PZ._create = async () => {
     const title = document.getElementById('st').value.trim() || 'Sesión sin título';
     if (tasks.length < 2) { toast('⚠️ Agrega al menos 2 tareas'); return; }
@@ -148,9 +164,10 @@ function showAdminSetup() {
     <div class="section-title">Tareas a priorizar</div>
     <div class="tasks-tags-wrap" id="tw">${tagsHTML()}</div>
     <div class="tag-input-wrap">
-      <input type="text" id="ti" placeholder="Agregar tarea..." onkeydown="if(event.key==='Enter')PZ._at()"/>
+      <input type="text" id="ti" placeholder="Agregar tarea... (o pega varias líneas)" onkeydown="if(event.key==='Enter')PZ._at()" onpaste="PZ._pt(event)"/>
       <button class="btn btn-secondary" onclick="PZ._at()" style="padding:14px 18px;flex-shrink:0">+ Agregar</button>
     </div>
+    <p style="color:var(--muted);font-size:0.72rem;margin:-4px 0 12px">💡 Pega texto de varios renglones y cada uno se agrega como una tarea aparte.</p>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="PZ._create()">Crear sesión →</button>
       <button class="btn btn-secondary" onclick="PZ.showHome()">← Atrás</button>
@@ -381,7 +398,7 @@ function renderResults(id, tasks, votes, animated) {
 }
 
 window.PZ = { showHome, showAdminSetup, showAdminPanel, showJoin, promptJoin, showResults, showWaiting,
-  _rt:null,_at:null,_create:null,_join:null,_gj:null,_ds:null,_de:null,_dd:null,_mv:null,
+  _rt:null,_at:null,_pt:null,_create:null,_join:null,_gj:null,_ds:null,_de:null,_dd:null,_mv:null,
   _submit:null,_sh:null,_start:null,_close:null,_copy:null };
 
 showHome();

@@ -17,6 +17,27 @@ si fue un bug). Lo más reciente va arriba.
 
 ---
 
+### 2026-09-22 — Pegar varios renglones = varias tareas de una vez
+- **Qué:** pedido de Anvir: "permitir pegar algo de varios renglones y
+  determinar cada renglón como una tarea a priorizar". El input de
+  "Agregar tarea..." (pantalla "Configura tu sesión") gana `onpaste="PZ._pt(event)"`
+  — si el texto pegado trae saltos de línea, se intercepta el pegado
+  normal, se parte por renglón (`\r?\n`), se descartan líneas vacías, y
+  cada línea se agrega como una tarea aparte (reusa el mismo `tasks.push`
+  que ya usaba `_at()`). Un pegado de una sola línea sigue el
+  comportamiento normal del input (no se intercepta). Toast confirma
+  cuántas tareas se agregaron. Se agregó una nota chica debajo del input
+  explicando el atajo.
+- **Archivo(s):** `index.html` (`showAdminSetup()`: nueva `PZ._pt`, atributo
+  `onpaste` en `#ti`, hint de texto, registro en el objeto `window.PZ`).
+- **Por qué:** antes solo se podía agregar una tarea a la vez tecleando o
+  pegando (un pegado con saltos de línea entraba completo como el texto de
+  UNA sola tarea, con los saltos de línea incluidos) — con una lista larga
+  copiada de notas/Excel/WhatsApp era muy lento cargarla tarea por tarea.
+- **Cómo se verificó:** revisión manual del flujo (parseo de líneas,
+  filtro de vacíos, reutilización de `tagsHTML()`/`tasks` existentes) y
+  chequeo de sintaxis del `<script type="module">` con `node --check`.
+
 ### 2026-07-31 — Se crea la bitácora + reglas obligatorias en CLAUDE.md
 - **Qué:** se agrega este `docs/BACKLOG.md` y un bloque de **Reglas
   Obligatorias** al inicio de `CLAUDE.md` (todo cambio va directo a `main`;
