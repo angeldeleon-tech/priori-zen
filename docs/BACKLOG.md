@@ -147,3 +147,11 @@ si fue un bug). Lo más reciente va arriba.
 - **Por qué:** dejar un lugar fijo para registrar cambios y que la regla de
   documentación no dependa de la memoria de una sesión de chat.
 - **Cómo se verificó:** archivo presente en `main` tras el push.
+
+
+## Sincronización con el Maestro de Drive y backlog-global — 2026-10-06
+
+Pendientes y decisiones registrados hoy en «KA - Backlog Maestro» (sección **Priori-Zen**), tras auditar este repo contra el buzón:
+
+- [ ] PRZ-001 | P1 | Anx: actualizar las reglas de la Realtime Database de Firebase para que «Crear sesión» deje de dar PERMISSION_DENIED (sessions con .read/.write true) | Anx | 2026-10-06
+- [ ] PRZ-002 | P2 | Anx: probar con gente real el modo de 3 rondas (#375): recolección en vivo, cronómetro y revelado | Anx | 2026-10-06
